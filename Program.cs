@@ -85,6 +85,9 @@ class Program
             {
                 try
                 {
+                    // Delete the entry if it already exists.
+                    await collection.DeleteAsync(x.Key);
+                    // Upsert the entry.
                     return await collection.UpsertAsync(x);
                 }
                 catch (Exception ex)
