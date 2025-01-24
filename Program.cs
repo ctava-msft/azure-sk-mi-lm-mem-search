@@ -1,8 +1,10 @@
 using Azure;
 using Azure.AI.OpenAI;
 using Azure.Identity;
+using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Indexes.Models;
+using Azure.Search.Documents.Models;
 using DotNetEnv;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.VectorData;
@@ -52,7 +54,8 @@ class Program
 
             // Create a search index client.
             var indexClient = new SearchIndexClient(new Uri(aisearch_endpoint), credentials);
-            
+            var indexName = Environment.GetEnvironmentVariable("AISEARCH_INDEXNAME");
+
             // Construct an InMemory vector store.
             // var vectorStore = new InMemoryVectorStore();
 
@@ -98,51 +101,57 @@ class Program
             });
             var upsertedKeys = await Task.WhenAll(upsertedKeysTasks);
 
-            // Search the collection using a vector search.
-            var searchString = "What is an Application Programming Interface";
-            var searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
-            var searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 1 });
-            var resultRecords = new List<VectorSearchResult<Glossary>>();
-            await foreach (var result in searchResult.Results)
-            {
-                resultRecords.Add(result);
-            }
+            // Call the new search method within Main
+            string searchUrl = "https://example.com/1";
+            SearchClient searchClient = indexClient.GetSearchClient(indexName);
+            string chunkId = await SearchChunkIdByUrlAsync(searchClient, searchUrl);
+            Console.WriteLine($"ChunkId for URL '{searchUrl}': {chunkId}");
 
-            Console.WriteLine("Search string: " + searchString);
-            Console.WriteLine("Result: " + resultRecords.First().Record.Definition);
-            Console.WriteLine();
+            // // Search the collection using a vector search.
+            // var searchString = "What is an Application Programming Interface";
+            // var searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
+            // var searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 1 });
+            // var resultRecords = new List<VectorSearchResult<Glossary>>();
+            // await foreach (var result in searchResult.Results)
+            // {
+            //     resultRecords.Add(result);
+            // }
 
-            // Search the collection using a vector search.
-            searchString = "What is Retrieval Augmented Generation";
-            searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
-            searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 1 });
-            resultRecords = new List<VectorSearchResult<Glossary>>();
-            await foreach (var result in searchResult.Results)
-            {
-                resultRecords.Add(result);
-            }
+            // Console.WriteLine("Search string: " + searchString);
+            // Console.WriteLine("Result: " + resultRecords.First().Record.Definition);
+            // Console.WriteLine();
 
-            Console.WriteLine("Search string: " + searchString);
-            Console.WriteLine("Result: " + resultRecords.First().Record.Definition);
-            Console.WriteLine();
+            // // Search the collection using a vector search.
+            // searchString = "What is Retrieval Augmented Generation";
+            // searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
+            // searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 1 });
+            // resultRecords = new List<VectorSearchResult<Glossary>>();
+            // await foreach (var result in searchResult.Results)
+            // {
+            //     resultRecords.Add(result);
+            // }
 
-            // Search the collection using a vector search with pre-filtering.
-            searchString = "What is Retrieval Augmented Generation";
-            searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
-            var filter = new VectorSearchFilter().EqualTo(nameof(Glossary.Category), "External Definitions");
-            searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 3, Filter = filter });
-            resultRecords = new List<VectorSearchResult<Glossary>>();
-            await foreach (var result in searchResult.Results)
-            {
-                resultRecords.Add(result);
-            }
+            // Console.WriteLine("Search string: " + searchString);
+            // Console.WriteLine("Result: " + resultRecords.First().Record.Definition);
+            // Console.WriteLine();
 
-            Console.WriteLine("Search string: " + searchString);
-            Console.WriteLine("Number of results: " + resultRecords.Count);
-            Console.WriteLine("Result 1 Score: " + resultRecords[0].Score);
-            Console.WriteLine("Result 1: " + resultRecords[0].Record.Definition);
-            Console.WriteLine("Result 2 Score: " + resultRecords[1].Score);
-            Console.WriteLine("Result 2: " + resultRecords[1].Record.Definition);
+            // // Search the collection using a vector search with pre-filtering.
+            // searchString = "What is Retrieval Augmented Generation";
+            // searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
+            // var filter = new VectorSearchFilter().EqualTo(nameof(Glossary.Category), "External Definitions");
+            // searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 3, Filter = filter });
+            // resultRecords = new List<VectorSearchResult<Glossary>>();
+            // await foreach (var result in searchResult.Results)
+            // {
+            //     resultRecords.Add(result);
+            // }
+
+            // Console.WriteLine("Search string: " + searchString);
+            // Console.WriteLine("Number of results: " + resultRecords.Count);
+            // Console.WriteLine("Result 1 Score: " + resultRecords[0].Score);
+            // Console.WriteLine("Result 1: " + resultRecords[0].Record.Definition);
+            // Console.WriteLine("Result 2 Score: " + resultRecords[1].Score);
+            // Console.WriteLine("Result 2: " + resultRecords[1].Record.Definition);
         }
         catch (Exception ex)
         {
@@ -174,6 +183,9 @@ class Program
 
         [VectorStoreRecordVector(model_embeddings_dimension)]
         public ReadOnlyMemory<float> DefinitionEmbedding { get; set; }
+
+        [VectorStoreRecordData]
+        public string Url { get; set; }
     }
 
     /// <summary>
@@ -187,7 +199,8 @@ class Program
             Key = "1",
             Category = "External Definitions",
             Term = "API",
-            Definition = "Application Programming Interface. A set of rules and specifications that allow software components to communicate and exchange data."
+            Definition = "Application Programming Interface. A set of rules and specifications that allow software components to communicate and exchange data.",
+            Url = "https://example.com/1"
         };
 
         yield return new Glossary
@@ -195,7 +208,8 @@ class Program
             Key = "2",
             Category = "Core Definitions",
             Term = "Connectors",
-            Definition = "Connectors allow you to integrate with various services provide AI capabilities, including LLM, AudioToText, TextToAudio, Embedding generation, etc."
+            Definition = "Connectors allow you to integrate with various services provide AI capabilities, including LLM, AudioToText, TextToAudio, Embedding generation, etc.",
+            Url = "https://example.com/2"
         };
 
         yield return new Glossary
@@ -203,7 +217,29 @@ class Program
             Key = "3",
             Category = "External Definitions",
             Term = "RAG",
-            Definition = "Retrieval Augmented Generation - a term that refers to the process of retrieving additional data to provide as context to an LLM to use when generating a response (completion) to a user’s question (prompt)."
+            Definition = "Retrieval Augmented Generation - a term that refers to the process of retrieving additional data to provide as context to an LLM to use when generating a response (completion) to a user’s question (prompt).",
+            Url = "https://example.com/3"
         };
+    }
+
+    // Add the new search method
+    private static async Task<string> SearchChunkIdByUrlAsync(SearchClient searchClient, string url)
+    {
+        var searchOptions = new SearchOptions
+        {
+            Filter = $"URL eq '{url}'"
+        };
+        searchOptions.Select.Add("Key");
+        var response = await searchClient.SearchAsync<SearchDocument>("", searchOptions);
+        string chunkId = null;
+        await foreach (var result in response.Value.GetResultsAsync())
+        {
+            if (result.Document.TryGetValue("Key", out var id))
+            {
+                chunkId = id.ToString();
+                break;
+            }
+        }
+        return chunkId;
     }
 }
