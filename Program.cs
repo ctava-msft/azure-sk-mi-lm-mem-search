@@ -101,10 +101,9 @@ class Program
             });
             var upsertedKeys = await Task.WhenAll(upsertedKeysTasks);
 
-            // Call the new search method within Main
             string searchUrl = "https://example.com/1";
-            SearchClient searchClient = indexClient.GetSearchClient(indexName);
-            string chunkId = await SearchChunkIdByUrlAsync(searchClient, searchUrl);
+            //string chunkId = await SearchChunkIdByUrlAsync(collection, searchUrl);
+            string chunkId = await VectorSearchChunkIdByUrlAsync(textEmbeddingGenerationService, collection, searchUrl);
             Console.WriteLine($"ChunkId for URL '{searchUrl}': {chunkId}");
 
             // // Search the collection using a vector search.
@@ -222,24 +221,66 @@ class Program
         };
     }
 
-    // Add the new search method
-    private static async Task<string> SearchChunkIdByUrlAsync(SearchClient searchClient, string url)
+    // Modify SearchChunkIdByUrlAsync to perform a filter-only search using SearchClient
+    private static async Task<string> VectorSearchChunkIdByUrlAsync(AzureOpenAITextEmbeddingGenerationService textEmbeddingGenerationService, IVectorStoreRecordCollection<string, Glossary> collection, string url)
     {
-        var searchOptions = new SearchOptions
+        try
         {
-            Filter = $"URL eq '{url}'"
-        };
-        searchOptions.Select.Add("Key");
-        var response = await searchClient.SearchAsync<SearchDocument>("", searchOptions);
-        string chunkId = null;
-        await foreach (var result in response.Value.GetResultsAsync())
-        {
-            if (result.Document.TryGetValue("Key", out var id))
+            var filter = new VectorSearchFilter().EqualTo(nameof(Glossary.Url), url);
+            var searchString = "";
+            var searchVector = await textEmbeddingGenerationService.GenerateEmbeddingAsync(searchString);
+            // var searchVector = new ReadOnlyMemory<float>(new float[model_embeddings_dimension]);
+            
+            Console.WriteLine("Starting vector search...");
+            var searchResult = await collection.VectorizedSearchAsync(searchVector, new() { Top = 1, Filter = filter });
+            Console.WriteLine("Vector search completed.");
+
+            await foreach (var result in searchResult.Results)
             {
-                chunkId = id.ToString();
-                break;
+                Console.WriteLine($"Found ChunkId: {result.Record.Key}");
+                return result.Record.Key;
             }
         }
-        return chunkId;
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in VectorSearchChunkIdByUrlAsync: {ex.Message}");
+            Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+            // Optionally, rethrow or handle the exception as needed
+        }
+        return null;
+    }
+
+    // Modify SearchChunkIdByUrlAsync to perform a filter-only search using SearchClient
+    private static async Task<string> SearchChunkIdByUrlAsync(AzureOpenAITextEmbeddingGenerationService textEmbeddingGenerationService, IVectorStoreRecordCollection<string, Glossary> collection, string url)
+    {
+        try
+        {
+            // Initialize the SearchClient
+            var searchClient = new SearchClient(
+                new Uri(Environment.GetEnvironmentVariable("AISEARCH_ENDPOINT")),
+                "skglossary",
+                new DefaultAzureCredential());
+
+            // Define search options with a filter for the URL
+            var options = new SearchOptions
+            {
+                Filter = $"Url eq '{url}'",
+                Size = 1
+            };
+
+            // Perform the search
+            var response = await searchClient.SearchAsync<Glossary>("*", options);
+
+            // Retrieve and return the Key of the first matching document
+            await foreach (var result in response.Value.GetResultsAsync())
+            {
+                return result.Document.Key;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Search failed: {ex.Message}");
+        }
+        return null;
     }
 }
